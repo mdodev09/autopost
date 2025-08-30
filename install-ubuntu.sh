@@ -424,13 +424,39 @@ setup_project() {
     # Installer toutes les dépendances
     print_info "Installation des dépendances du projet..."
     if [[ $EUID -eq 0 ]]; then
-        sudo -u "$APP_USER" npm run install:all
+        # Installer les dépendances du projet principal
+        sudo -u "$APP_USER" npm install
+        
+        # Installer les dépendances du serveur
+        cd server
+        sudo -u "$APP_USER" npm install
+        
+        # Installer les dépendances du client
+        cd ../client
+        sudo -u "$APP_USER" npm install
+        
+        # Retourner à la racine
+        cd ..
+        
+        # Définir les permissions
         chown -R "$APP_USER:$APP_USER" .
     else
-        npm run install:all
+        # Installer les dépendances du projet principal
+        npm install
+        
+        # Installer les dépendances du serveur
+        cd server
+        npm install
+        
+        # Installer les dépendances du client
+        cd ../client
+        npm install
+        
+        # Retourner à la racine
+        cd ..
     fi
     
-    print_success "Dépendances installées avec succès"
+    print_success "Toutes les dépendances installées avec succès"
 }
 
 # Configuration des variables d'environnement
@@ -530,8 +556,32 @@ if ! systemctl is-active --quiet mongod; then
     fi
 fi
 
-# Démarrer l'application
-npm run dev
+# Vérifier si concurrently est installé
+if ! command -v concurrently &> /dev/null && ! npx concurrently --version &> /dev/null 2>&1; then
+    echo "⚠️  Installation de concurrently manquante, installation en cours..."
+    npm install
+fi
+
+# Démarrer l'application avec concurrently si disponible, sinon manuellement
+if command -v concurrently &> /dev/null || npx concurrently --version &> /dev/null 2>&1; then
+    npm run dev
+else
+    echo "Démarrage du backend..."
+    cd server && npm run dev &
+    BACKEND_PID=\$!
+
+    echo "Démarrage du frontend..."
+    cd ../client && npm run dev &
+    FRONTEND_PID=\$!
+
+    echo "Backend PID: \$BACKEND_PID"
+    echo "Frontend PID: \$FRONTEND_PID"
+    echo "Appuyez sur Ctrl+C pour arrêter les deux services"
+
+    # Attendre que l'utilisateur appuie sur Ctrl+C
+    trap 'kill \$BACKEND_PID \$FRONTEND_PID' INT
+    wait
+fi
 EOF
     
     # Script pour la production
@@ -548,6 +598,20 @@ if ! systemctl is-active --quiet mongod; then
     else
         sudo systemctl start mongod
     fi
+fi
+
+# Vérifier si les dépendances sont installées
+if [[ ! -d "node_modules" ]] || [[ ! -d "server/node_modules" ]] || [[ ! -d "client/node_modules" ]]; then
+    echo "⚠️  Dépendances manquantes, installation en cours..."
+    
+    # Installer les dépendances du projet principal
+    npm install
+    
+    # Installer les dépendances du serveur
+    cd server && npm install && cd ..
+    
+    # Installer les dépendances du client
+    cd client && npm install && cd ..
 fi
 
 # Build de l'application
@@ -721,8 +785,14 @@ show_final_instructions() {
     echo -e "${YELLOW}📋 Prochaines étapes :${NC}"
     echo -e "1. Configurez vos clés API dans ${BLUE}server/.env${NC}"
     echo -e "2. Démarrez l'application en mode développement :"
-    echo -e "   ${BLUE}./start-dev.sh${NC}"
+    echo -e "   ${BLUE}./start-dev.sh${NC} (auto-détection des dépendances)"
     echo -e "3. Ouvrez votre navigateur sur ${BLUE}http://localhost:3000${NC}"
+    echo -e ""
+    echo -e "${GREEN}🔧 Améliorations apportées :${NC}"
+    echo -e "• Installation complète de toutes les dépendances (root, server, client)"
+    echo -e "• Scripts intelligents avec auto-détection des dépendances manquantes"
+    echo -e "• Fallback automatique si concurrently n'est pas disponible"
+    echo -e "• Support complet pour exécution en root et utilisateur normal"
     
     echo -e "\n${YELLOW}🛠️  Scripts disponibles :${NC}"
     echo -e "• ${BLUE}./start-dev.sh${NC}    - Mode développement"

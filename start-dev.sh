@@ -9,4 +9,18 @@ if ! systemctl is-active --quiet mongod; then
 fi
 
 # Démarrer l'application
-npm run dev
+echo "Démarrage du backend..."
+cd server && npm run dev &
+BACKEND_PID=$!
+
+echo "Démarrage du frontend..."
+cd ../client && npm run dev &
+FRONTEND_PID=$!
+
+echo "Backend PID: $BACKEND_PID"
+echo "Frontend PID: $FRONTEND_PID"
+echo "Appuyez sur Ctrl+C pour arrêter les deux services"
+
+# Attendre que l'utilisateur appuie sur Ctrl+C
+trap 'kill $BACKEND_PID $FRONTEND_PID' INT
+wait
