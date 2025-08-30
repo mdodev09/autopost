@@ -562,9 +562,6 @@ create_systemd_service() {
     
     if [[ $EUID -eq 0 ]]; then
         tee "$SERVICE_FILE" > /dev/null <<EOF
-    else
-        sudo tee "$SERVICE_FILE" > /dev/null <<EOF
-    fi
 [Unit]
 Description=AutoPost LinkedIn Application
 After=network.target mongod.service
@@ -582,6 +579,26 @@ Environment=NODE_ENV=production
 [Install]
 WantedBy=multi-user.target
 EOF
+    else
+        sudo tee "$SERVICE_FILE" > /dev/null <<EOF
+[Unit]
+Description=AutoPost LinkedIn Application
+After=network.target mongod.service
+Wants=mongod.service
+
+[Service]
+Type=forking
+User=${APP_USER}
+WorkingDirectory=${PROJECT_PATH}
+ExecStart=${PROJECT_PATH}/start-prod.sh
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
     
     # Recharger systemd et activer le service
     ${SUDO_CMD} systemctl daemon-reload
