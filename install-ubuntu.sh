@@ -692,8 +692,9 @@ FRONTEND_PID=$!
 echo -e "${GREEN}Backend PID: $BACKEND_PID${NC}"
 echo -e "${GREEN}Frontend PID: $FRONTEND_PID${NC}"
 echo -e "${YELLOW}Appuyez sur Ctrl+C pour arrêter les deux services${NC}"
-echo -e "${GREEN}🌐 Backend API: http://localhost:5000${NC}"
-echo -e "${GREEN}🌐 Frontend: http://localhost:3000${NC}"
+echo -e "${GREEN}🌐 Backend API: http://0.0.0.0:5000${NC}"
+echo -e "${GREEN}🌐 Frontend: http://0.0.0.0:3000${NC}"
+echo -e "${GREEN}🌍 Accessible depuis l'extérieur via l'IP du serveur${NC}"
 
 # Fonction de nettoyage améliorée
 cleanup() {
@@ -1074,6 +1075,7 @@ show_final_instructions() {
     echo -e "• Tests d'installation intégrés"
     echo -e "• Support complet root/utilisateur normal"
     echo -e "• Chemins absolus pour éviter les erreurs de navigation"
+    echo -e "• Configuration réseau pour accès externe (0.0.0.0)"
     
     echo -e "\n${YELLOW}🛠️  Scripts disponibles :${NC}"
     echo -e "• ${BLUE}./start-dev.sh${NC}    - Mode développement"

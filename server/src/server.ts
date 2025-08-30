@@ -71,9 +71,10 @@ const startServer = async () => {
     await connectDB();
     
     // Démarrage du serveur
-    app.listen(PORT, () => {
+    app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Serveur démarré sur le port ${PORT}`);
-      console.log(`📱 API disponible sur http://localhost:${PORT}/api`);
+      console.log(`📱 API disponible sur http://0.0.0.0:${PORT}/api`);
+      console.log(`🌐 Accessible depuis: http://[VOTRE_IP]:${PORT}/api`);
       console.log(`🌍 Environnement: ${process.env.NODE_ENV || 'development'}`);
     });
   } catch (error) {
