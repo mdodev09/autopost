@@ -423,40 +423,109 @@ setup_project() {
     
     # Installer toutes les dépendances
     print_info "Installation des dépendances du projet..."
+    
+    # Mémoriser le répertoire de base
+    BASE_DIR=$(pwd)
+    
     if [[ $EUID -eq 0 ]]; then
-        # Installer les dépendances du projet principal
+        # Installer les dépendances du projet principal (concurrently)
+        print_info "Installation des dépendances principales..."
         sudo -u "$APP_USER" npm install
+        
+        # Vérifier et installer concurrently globalement si nécessaire
+        if ! sudo -u "$APP_USER" npx concurrently --version &>/dev/null; then
+            print_info "Installation de concurrently..."
+            sudo -u "$APP_USER" npm install -g concurrently
+        fi
         
         # Installer les dépendances du serveur
-        cd server
+        print_info "Installation des dépendances du serveur..."
+        cd "$BASE_DIR/server"
         sudo -u "$APP_USER" npm install
         
+        # Vérifier et installer nodemon et typescript
+        if ! sudo -u "$APP_USER" npx nodemon --version &>/dev/null; then
+            print_info "Installation de nodemon..."
+            sudo -u "$APP_USER" npm install nodemon --save-dev
+        fi
+        if ! sudo -u "$APP_USER" npx tsc --version &>/dev/null; then
+            print_info "Installation de TypeScript..."
+            sudo -u "$APP_USER" npm install typescript --save-dev
+        fi
+        
         # Installer les dépendances du client
-        cd ../client
+        print_info "Installation des dépendances du client..."
+        cd "$BASE_DIR/client"
         sudo -u "$APP_USER" npm install
         
         # Retourner à la racine
-        cd ..
+        cd "$BASE_DIR"
         
         # Définir les permissions
         chown -R "$APP_USER:$APP_USER" .
     else
-        # Installer les dépendances du projet principal
+        # Installer les dépendances du projet principal (concurrently)
+        print_info "Installation des dépendances principales..."
         npm install
+        
+        # Vérifier et installer concurrently globalement si nécessaire
+        if ! npx concurrently --version &>/dev/null; then
+            print_info "Installation de concurrently..."
+            npm install -g concurrently 2>/dev/null || npm install concurrently
+        fi
         
         # Installer les dépendances du serveur
-        cd server
+        print_info "Installation des dépendances du serveur..."
+        cd "$BASE_DIR/server"
         npm install
         
+        # Vérifier et installer nodemon et typescript
+        if ! npx nodemon --version &>/dev/null; then
+            print_info "Installation de nodemon..."
+            npm install nodemon --save-dev
+        fi
+        if ! npx tsc --version &>/dev/null; then
+            print_info "Installation de TypeScript..."
+            npm install typescript --save-dev
+        fi
+        
         # Installer les dépendances du client
-        cd ../client
+        print_info "Installation des dépendances du client..."
+        cd "$BASE_DIR/client"
         npm install
         
         # Retourner à la racine
-        cd ..
+        cd "$BASE_DIR"
     fi
     
     print_success "Toutes les dépendances installées avec succès"
+    
+    # Vérification finale
+    print_info "Vérification des installations..."
+    cd "$BASE_DIR"
+    
+    # Vérifier concurrently
+    if npx concurrently --version &>/dev/null; then
+        print_success "Concurrently installé et fonctionnel"
+    else
+        print_warning "Concurrently non disponible (fallback manuel sera utilisé)"
+    fi
+    
+    # Vérifier nodemon
+    if cd server && npx nodemon --version &>/dev/null; then
+        print_success "Nodemon installé et fonctionnel"
+    else
+        print_error "Problème avec nodemon"
+    fi
+    
+    # Vérifier TypeScript
+    if npx tsc --version &>/dev/null; then
+        print_success "TypeScript installé et fonctionnel"
+    else
+        print_error "Problème avec TypeScript"
+    fi
+    
+    cd "$BASE_DIR"
 }
 
 # Configuration des variables d'environnement
@@ -541,88 +610,189 @@ create_startup_script() {
     print_header "Création du script de démarrage"
     
     # Script pour le développement
-    cat > start-dev.sh <<EOF
+    cat > start-dev.sh <<'EOF'
 #!/bin/bash
 
 echo "🚀 Démarrage d'AutoPost en mode développement..."
 
+# Couleurs
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# Fonction de vérification
+check_dependency() {
+    local dep_name="$1"
+    local check_cmd="$2"
+    local install_cmd="$3"
+    
+    if ! eval "$check_cmd" &>/dev/null; then
+        echo -e "${YELLOW}⚠️  $dep_name manquant, installation en cours...${NC}"
+        eval "$install_cmd"
+        if ! eval "$check_cmd" &>/dev/null; then
+            echo -e "${RED}❌ Échec de l'installation de $dep_name${NC}"
+            return 1
+        fi
+        echo -e "${GREEN}✅ $dep_name installé avec succès${NC}"
+    fi
+    return 0
+}
+
 # Vérifier que MongoDB est en cours d'exécution
-if ! systemctl is-active --quiet mongod; then
+if ! systemctl is-active --quiet mongod && ! systemctl is-active --quiet mongodb; then
     echo "⚠️  Démarrage de MongoDB..."
-    if [[ \$EUID -eq 0 ]]; then
-        systemctl start mongod
+    if [[ $EUID -eq 0 ]]; then
+        systemctl start mongod 2>/dev/null || systemctl start mongodb 2>/dev/null
     else
-        sudo systemctl start mongod
+        sudo systemctl start mongod 2>/dev/null || sudo systemctl start mongodb 2>/dev/null
     fi
 fi
 
-# Vérifier si concurrently est installé
-if ! command -v concurrently &> /dev/null && ! npx concurrently --version &> /dev/null 2>&1; then
-    echo "⚠️  Installation de concurrently manquante, installation en cours..."
+# Vérifications des dépendances
+BASE_DIR=$(pwd)
+
+# Vérifier concurrently
+check_dependency "concurrently" "npx concurrently --version" "npm install"
+
+# Vérifier nodemon pour le serveur
+cd "$BASE_DIR/server"
+check_dependency "nodemon" "npx nodemon --version" "npm install"
+
+# Vérifier les dépendances du client
+cd "$BASE_DIR/client"
+if [[ ! -d "node_modules" ]]; then
+    echo -e "${YELLOW}⚠️  Dépendances client manquantes, installation...${NC}"
     npm install
 fi
 
+# Retourner à la racine
+cd "$BASE_DIR"
+
 # Démarrer l'application avec concurrently si disponible, sinon manuellement
-if command -v concurrently &> /dev/null || npx concurrently --version &> /dev/null 2>&1; then
+if npx concurrently --version &>/dev/null; then
+    echo -e "${GREEN}🚀 Démarrage avec concurrently...${NC}"
     npm run dev
 else
+    echo -e "${YELLOW}🚀 Démarrage manuel (concurrently non disponible)...${NC}"
+    
     echo "Démarrage du backend..."
-    cd server && npm run dev &
-    BACKEND_PID=\$!
+    (cd server && npm run dev) &
+    BACKEND_PID=$!
 
     echo "Démarrage du frontend..."
-    cd ../client && npm run dev &
-    FRONTEND_PID=\$!
+    (cd client && npm run dev) &
+    FRONTEND_PID=$!
 
-    echo "Backend PID: \$BACKEND_PID"
-    echo "Frontend PID: \$FRONTEND_PID"
-    echo "Appuyez sur Ctrl+C pour arrêter les deux services"
+    echo -e "${GREEN}Backend PID: $BACKEND_PID${NC}"
+    echo -e "${GREEN}Frontend PID: $FRONTEND_PID${NC}"
+    echo -e "${YELLOW}Appuyez sur Ctrl+C pour arrêter les deux services${NC}"
+
+    # Fonction de nettoyage
+    cleanup() {
+        echo -e "\n${YELLOW}Arrêt des services...${NC}"
+        kill $BACKEND_PID $FRONTEND_PID 2>/dev/null
+        exit 0
+    }
 
     # Attendre que l'utilisateur appuie sur Ctrl+C
-    trap 'kill \$BACKEND_PID \$FRONTEND_PID' INT
+    trap cleanup INT TERM
     wait
 fi
 EOF
     
     # Script pour la production
-    cat > start-prod.sh <<EOF
+    cat > start-prod.sh <<'EOF'
 #!/bin/bash
 
 echo "🚀 Démarrage d'AutoPost en mode production..."
 
+# Couleurs
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# Fonction de vérification
+check_dependency() {
+    local dep_name="$1"
+    local check_cmd="$2"
+    local install_cmd="$3"
+    
+    if ! eval "$check_cmd" &>/dev/null; then
+        echo -e "${YELLOW}⚠️  $dep_name manquant, installation en cours...${NC}"
+        eval "$install_cmd"
+        if ! eval "$check_cmd" &>/dev/null; then
+            echo -e "${RED}❌ Échec de l'installation de $dep_name${NC}"
+            return 1
+        fi
+        echo -e "${GREEN}✅ $dep_name installé avec succès${NC}"
+    fi
+    return 0
+}
+
 # Vérifier que MongoDB est en cours d'exécution
-if ! systemctl is-active --quiet mongod; then
+if ! systemctl is-active --quiet mongod && ! systemctl is-active --quiet mongodb; then
     echo "⚠️  Démarrage de MongoDB..."
-    if [[ \$EUID -eq 0 ]]; then
-        systemctl start mongod
+    if [[ $EUID -eq 0 ]]; then
+        systemctl start mongod 2>/dev/null || systemctl start mongodb 2>/dev/null
     else
-        sudo systemctl start mongod
+        sudo systemctl start mongod 2>/dev/null || sudo systemctl start mongodb 2>/dev/null
     fi
 fi
 
-# Vérifier si les dépendances sont installées
-if [[ ! -d "node_modules" ]] || [[ ! -d "server/node_modules" ]] || [[ ! -d "client/node_modules" ]]; then
-    echo "⚠️  Dépendances manquantes, installation en cours..."
-    
-    # Installer les dépendances du projet principal
+# Vérifications des dépendances
+BASE_DIR=$(pwd)
+
+# Vérifier les dépendances principales
+if [[ ! -d "node_modules" ]]; then
+    echo -e "${YELLOW}⚠️  Dépendances principales manquantes, installation...${NC}"
     npm install
-    
-    # Installer les dépendances du serveur
-    cd server && npm install && cd ..
-    
-    # Installer les dépendances du client
-    cd client && npm install && cd ..
 fi
 
+# Vérifier les dépendances du serveur
+cd "$BASE_DIR/server"
+if [[ ! -d "node_modules" ]]; then
+    echo -e "${YELLOW}⚠️  Dépendances serveur manquantes, installation...${NC}"
+    npm install
+fi
+
+# Vérifier TypeScript
+check_dependency "TypeScript" "npx tsc --version" "npm install typescript --save-dev"
+
+# Vérifier les dépendances du client
+cd "$BASE_DIR/client"
+if [[ ! -d "node_modules" ]]; then
+    echo -e "${YELLOW}⚠️  Dépendances client manquantes, installation...${NC}"
+    npm install
+fi
+
+# Retourner à la racine
+cd "$BASE_DIR"
+
 # Build de l'application
-npm run build
+echo -e "${GREEN}🔨 Construction de l'application...${NC}"
+if npm run build; then
+    echo -e "${GREEN}✅ Build réussi${NC}"
+else
+    echo -e "${RED}❌ Échec du build${NC}"
+    exit 1
+fi
+
+# Vérifier que PM2 est installé
+if ! command -v pm2 &>/dev/null; then
+    echo -e "${YELLOW}⚠️  PM2 non trouvé, installation...${NC}"
+    npm install -g pm2
+fi
 
 # Démarrer avec PM2
+echo -e "${GREEN}🚀 Démarrage avec PM2...${NC}"
 pm2 start ecosystem.config.js --env production
 
-echo "✅ Application démarrée avec PM2"
-echo "📊 Utilisez 'pm2 status' pour voir l'état"
-echo "📋 Utilisez 'pm2 logs' pour voir les logs"
+echo -e "${GREEN}✅ Application démarrée avec PM2${NC}"
+echo -e "${GREEN}📊 Utilisez 'pm2 status' pour voir l'état${NC}"
+echo -e "${GREEN}📋 Utilisez 'pm2 logs' pour voir les logs${NC}"
+echo -e "${GREEN}🌐 API disponible sur http://localhost:5000/api${NC}"
 EOF
     
     # Configuration PM2
@@ -730,6 +900,47 @@ EOF
     fi
 }
 
+# Test de l'installation complète
+test_installation() {
+    print_header "Test de l'installation"
+    
+    local errors=0
+    
+    # Test des scripts créés
+    if [[ -x "start-dev.sh" ]]; then
+        print_success "Script start-dev.sh créé et exécutable"
+    else
+        print_error "Script start-dev.sh manquant ou non exécutable"
+        ((errors++))
+    fi
+    
+    if [[ -x "start-prod.sh" ]]; then
+        print_success "Script start-prod.sh créé et exécutable"
+    else
+        print_error "Script start-prod.sh manquant ou non exécutable"
+        ((errors++))
+    fi
+    
+    if [[ -f "ecosystem.config.js" ]]; then
+        print_success "Configuration PM2 créée"
+    else
+        print_error "Configuration PM2 manquante"
+        ((errors++))
+    fi
+    
+    # Test rapide du build (sans démarrer)
+    print_info "Test du processus de build..."
+    cd server
+    if npx tsc --noEmit &>/dev/null; then
+        print_success "Code TypeScript valide"
+    else
+        print_warning "Problèmes TypeScript détectés (mais non bloquants)"
+    fi
+    cd ..
+    
+    return $errors
+}
+
 # Vérification finale
 final_checks() {
     print_header "Vérifications finales"
@@ -749,7 +960,7 @@ final_checks() {
     fi
     
     # Vérifier MongoDB
-    if systemctl is-active --quiet mongod; then
+    if systemctl is-active --quiet mongod || systemctl is-active --quiet mongodb; then
         print_success "MongoDB: En cours d'exécution"
     else
         print_warning "MongoDB: Arrêté"
@@ -774,6 +985,28 @@ final_checks() {
     else
         print_warning "Configuration: server/.env non trouvé"
     fi
+    
+    # Vérifier les dépendances critiques
+    if [[ -d "node_modules" ]]; then
+        print_success "Dépendances principales installées"
+    else
+        print_error "Dépendances principales manquantes"
+    fi
+    
+    if [[ -d "server/node_modules" ]]; then
+        print_success "Dépendances serveur installées"
+    else
+        print_error "Dépendances serveur manquantes"
+    fi
+    
+    if [[ -d "client/node_modules" ]]; then
+        print_success "Dépendances client installées"
+    else
+        print_error "Dépendances client manquantes"
+    fi
+    
+    # Test de l'installation
+    test_installation
 }
 
 # Affichage des instructions finales
@@ -789,10 +1022,13 @@ show_final_instructions() {
     echo -e "3. Ouvrez votre navigateur sur ${BLUE}http://localhost:3000${NC}"
     echo -e ""
     echo -e "${GREEN}🔧 Améliorations apportées :${NC}"
-    echo -e "• Installation complète de toutes les dépendances (root, server, client)"
-    echo -e "• Scripts intelligents avec auto-détection des dépendances manquantes"
-    echo -e "• Fallback automatique si concurrently n'est pas disponible"
-    echo -e "• Support complet pour exécution en root et utilisateur normal"
+    echo -e "• Installation complète et vérifiée de toutes les dépendances"
+    echo -e "• Scripts intelligents avec auto-détection et auto-réparation"
+    echo -e "• Gestion robuste des erreurs et fallbacks automatiques"
+    echo -e "• Support MongoDB Ubuntu 24.04 avec fallback"
+    echo -e "• Tests d'installation intégrés"
+    echo -e "• Support complet root/utilisateur normal"
+    echo -e "• Chemins absolus pour éviter les erreurs de navigation"
     
     echo -e "\n${YELLOW}🛠️  Scripts disponibles :${NC}"
     echo -e "• ${BLUE}./start-dev.sh${NC}    - Mode développement"
