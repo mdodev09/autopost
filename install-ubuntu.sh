@@ -393,9 +393,6 @@ configure_environment() {
             # Créer un fichier .env basique
             if [[ $EUID -eq 0 ]]; then
                 sudo -u "$APP_USER" tee .env > /dev/null <<EOF
-            else
-                cat > .env <<EOF
-            fi
 # Configuration Base de données
 MONGODB_URI=mongodb://localhost:27017/autopost
 
@@ -416,6 +413,29 @@ NODE_ENV=development
 PORT=5000
 FRONTEND_URL=http://localhost:3000
 EOF
+            else
+                cat > .env <<EOF
+# Configuration Base de données
+MONGODB_URI=mongodb://localhost:27017/autopost
+
+# Configuration JWT
+JWT_SECRET=$(openssl rand -hex 32)
+JWT_EXPIRE=7d
+
+# Configuration OpenAI
+OPENAI_API_KEY=votre_cle_api_openai
+
+# Configuration LinkedIn OAuth
+LINKEDIN_CLIENT_ID=votre_client_id_linkedin
+LINKEDIN_CLIENT_SECRET=votre_client_secret_linkedin
+LINKEDIN_REDIRECT_URI=http://localhost:5000/api/auth/linkedin/callback
+
+# Configuration serveur
+NODE_ENV=development
+PORT=5000
+FRONTEND_URL=http://localhost:3000
+EOF
+            fi
             print_info "Fichier .env créé avec une configuration par défaut"
         fi
     else
