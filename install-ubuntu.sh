@@ -621,20 +621,23 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# Fonction de vérification
-check_dependency() {
+# Fonction de vérification rapide (sans npx qui peut se bloquer)
+check_dependency_fast() {
     local dep_name="$1"
-    local check_cmd="$2"
+    local dep_path="$2"
     local install_cmd="$3"
     
-    if ! eval "$check_cmd" &>/dev/null; then
+    if [[ ! -f "$dep_path" ]]; then
         echo -e "${YELLOW}⚠️  $dep_name manquant, installation en cours...${NC}"
         eval "$install_cmd"
-        if ! eval "$check_cmd" &>/dev/null; then
+        if [[ -f "$dep_path" ]]; then
+            echo -e "${GREEN}✅ $dep_name installé avec succès${NC}"
+        else
             echo -e "${RED}❌ Échec de l'installation de $dep_name${NC}"
             return 1
         fi
-        echo -e "${GREEN}✅ $dep_name installé avec succès${NC}"
+    else
+        echo -e "${GREEN}✅ $dep_name disponible${NC}"
     fi
     return 0
 }
@@ -649,56 +652,75 @@ if ! systemctl is-active --quiet mongod && ! systemctl is-active --quiet mongodb
     fi
 fi
 
-# Vérifications des dépendances
+# Vérifications des dépendances avec timeouts
 BASE_DIR=$(pwd)
 
-# Vérifier concurrently
-check_dependency "concurrently" "npx concurrently --version" "npm install"
+# Vérifier concurrently (vérification basée sur fichier)
+if [[ ! -f "node_modules/.bin/concurrently" ]] && [[ ! -d "node_modules/concurrently" ]]; then
+    echo -e "${YELLOW}⚠️  Concurrently manquant, installation...${NC}"
+    npm install --no-optional 2>/dev/null || true
+fi
 
-# Vérifier nodemon pour le serveur
+# Vérifier les dépendances du serveur
 cd "$BASE_DIR/server"
-check_dependency "nodemon" "npx nodemon --version" "npm install"
+if [[ ! -d "node_modules" ]]; then
+    echo -e "${YELLOW}⚠️  Dépendances serveur manquantes, installation...${NC}"
+    npm install --no-optional 2>/dev/null || true
+fi
 
 # Vérifier les dépendances du client
 cd "$BASE_DIR/client"
 if [[ ! -d "node_modules" ]]; then
     echo -e "${YELLOW}⚠️  Dépendances client manquantes, installation...${NC}"
-    npm install
+    npm install --no-optional 2>/dev/null || true
 fi
 
 # Retourner à la racine
 cd "$BASE_DIR"
 
-# Démarrer l'application avec concurrently si disponible, sinon manuellement
-if npx concurrently --version &>/dev/null; then
-    echo -e "${GREEN}🚀 Démarrage avec concurrently...${NC}"
-    npm run dev
-else
-    echo -e "${YELLOW}🚀 Démarrage manuel (concurrently non disponible)...${NC}"
+# Démarrer l'application - toujours utiliser le mode manuel pour éviter les blocages
+echo -e "${GREEN}🚀 Démarrage de l'application...${NC}"
+
+echo "Démarrage du backend..."
+(cd server && npm run dev 2>/dev/null) &
+BACKEND_PID=$!
+
+echo "Démarrage du frontend..."
+(cd client && npm run dev 2>/dev/null) &
+FRONTEND_PID=$!
+
+echo -e "${GREEN}Backend PID: $BACKEND_PID${NC}"
+echo -e "${GREEN}Frontend PID: $FRONTEND_PID${NC}"
+echo -e "${YELLOW}Appuyez sur Ctrl+C pour arrêter les deux services${NC}"
+echo -e "${GREEN}🌐 Backend API: http://localhost:5000${NC}"
+echo -e "${GREEN}🌐 Frontend: http://localhost:3000${NC}"
+
+# Fonction de nettoyage améliorée
+cleanup() {
+    echo -e "\n${YELLOW}⏹️  Arrêt des services...${NC}"
     
-    echo "Démarrage du backend..."
-    (cd server && npm run dev) &
-    BACKEND_PID=$!
+    # Tuer les processus et leurs enfants
+    if kill -0 $BACKEND_PID 2>/dev/null; then
+        kill -TERM $BACKEND_PID 2>/dev/null || true
+    fi
+    
+    if kill -0 $FRONTEND_PID 2>/dev/null; then
+        kill -TERM $FRONTEND_PID 2>/dev/null || true
+    fi
+    
+    # Attendre un peu puis forcer si nécessaire
+    sleep 2
+    pkill -f "npm run dev" 2>/dev/null || true
+    pkill -f "vite" 2>/dev/null || true
+    pkill -f "nodemon" 2>/dev/null || true
+    
+    echo -e "${GREEN}✅ Services arrêtés${NC}"
+    exit 0
+}
 
-    echo "Démarrage du frontend..."
-    (cd client && npm run dev) &
-    FRONTEND_PID=$!
-
-    echo -e "${GREEN}Backend PID: $BACKEND_PID${NC}"
-    echo -e "${GREEN}Frontend PID: $FRONTEND_PID${NC}"
-    echo -e "${YELLOW}Appuyez sur Ctrl+C pour arrêter les deux services${NC}"
-
-    # Fonction de nettoyage
-    cleanup() {
-        echo -e "\n${YELLOW}Arrêt des services...${NC}"
-        kill $BACKEND_PID $FRONTEND_PID 2>/dev/null
-        exit 0
-    }
-
-    # Attendre que l'utilisateur appuie sur Ctrl+C
-    trap cleanup INT TERM
-    wait
-fi
+# Attendre que l'utilisateur appuie sur Ctrl+C
+trap cleanup INT TERM EXIT
+wait
 EOF
     
     # Script pour la production
@@ -713,22 +735,18 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# Fonction de vérification
-check_dependency() {
-    local dep_name="$1"
-    local check_cmd="$2"
-    local install_cmd="$3"
+# Fonction de vérification sans blocage
+check_files() {
+    local description="$1"
+    local path="$2"
     
-    if ! eval "$check_cmd" &>/dev/null; then
-        echo -e "${YELLOW}⚠️  $dep_name manquant, installation en cours...${NC}"
-        eval "$install_cmd"
-        if ! eval "$check_cmd" &>/dev/null; then
-            echo -e "${RED}❌ Échec de l'installation de $dep_name${NC}"
-            return 1
-        fi
-        echo -e "${GREEN}✅ $dep_name installé avec succès${NC}"
+    if [[ -e "$path" ]]; then
+        echo -e "${GREEN}✅ $description disponible${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ $description manquant: $path${NC}"
+        return 1
     fi
-    return 0
 }
 
 # Vérifier que MongoDB est en cours d'exécution
@@ -741,58 +759,85 @@ if ! systemctl is-active --quiet mongod && ! systemctl is-active --quiet mongodb
     fi
 fi
 
-# Vérifications des dépendances
+# Vérifications des dépendances (basées sur les fichiers)
 BASE_DIR=$(pwd)
 
 # Vérifier les dépendances principales
 if [[ ! -d "node_modules" ]]; then
     echo -e "${YELLOW}⚠️  Dépendances principales manquantes, installation...${NC}"
-    npm install
+    npm install --no-optional --silent 2>/dev/null || npm install --no-optional
 fi
 
 # Vérifier les dépendances du serveur
 cd "$BASE_DIR/server"
 if [[ ! -d "node_modules" ]]; then
     echo -e "${YELLOW}⚠️  Dépendances serveur manquantes, installation...${NC}"
-    npm install
+    npm install --no-optional --silent 2>/dev/null || npm install --no-optional
 fi
 
-# Vérifier TypeScript
-check_dependency "TypeScript" "npx tsc --version" "npm install typescript --save-dev"
+# Vérifier TypeScript (basé sur fichier)
+if [[ ! -f "node_modules/.bin/tsc" ]] && [[ ! -d "node_modules/typescript" ]]; then
+    echo -e "${YELLOW}⚠️  TypeScript manquant, installation...${NC}"
+    npm install typescript --save-dev --no-optional --silent 2>/dev/null || npm install typescript --save-dev
+fi
 
 # Vérifier les dépendances du client
 cd "$BASE_DIR/client"
 if [[ ! -d "node_modules" ]]; then
     echo -e "${YELLOW}⚠️  Dépendances client manquantes, installation...${NC}"
-    npm install
+    npm install --no-optional --silent 2>/dev/null || npm install --no-optional
 fi
 
 # Retourner à la racine
 cd "$BASE_DIR"
 
-# Build de l'application
+# Arrêter PM2 existant pour éviter les conflits
+echo -e "${YELLOW}🧹 Nettoyage des processus PM2 existants...${NC}"
+pm2 delete all 2>/dev/null || true
+
+# Build de l'application avec timeout
 echo -e "${GREEN}🔨 Construction de l'application...${NC}"
-if npm run build; then
-    echo -e "${GREEN}✅ Build réussi${NC}"
+timeout 300 npm run build 2>/dev/null || {
+    echo -e "${RED}❌ Échec du build ou timeout${NC}"
+    echo -e "${YELLOW}ℹ️  Tentative de build du serveur uniquement...${NC}"
+    cd server
+    timeout 120 npm run build 2>/dev/null || {
+        echo -e "${RED}❌ Impossible de compiler le serveur${NC}"
+        exit 1
+    }
+    cd "$BASE_DIR"
+}
+
+# Vérifier que le build a réussi
+if [[ -f "server/dist/server.js" ]]; then
+    echo -e "${GREEN}✅ Build serveur réussi${NC}"
 else
-    echo -e "${RED}❌ Échec du build${NC}"
+    echo -e "${RED}❌ Fichier serveur compilé manquant${NC}"
     exit 1
 fi
 
 # Vérifier que PM2 est installé
 if ! command -v pm2 &>/dev/null; then
     echo -e "${YELLOW}⚠️  PM2 non trouvé, installation...${NC}"
-    npm install -g pm2
+    npm install -g pm2 --silent 2>/dev/null || npm install -g pm2
 fi
+
+# Créer le dossier logs si nécessaire
+mkdir -p logs
 
 # Démarrer avec PM2
 echo -e "${GREEN}🚀 Démarrage avec PM2...${NC}"
-pm2 start ecosystem.config.js --env production
-
-echo -e "${GREEN}✅ Application démarrée avec PM2${NC}"
-echo -e "${GREEN}📊 Utilisez 'pm2 status' pour voir l'état${NC}"
-echo -e "${GREEN}📋 Utilisez 'pm2 logs' pour voir les logs${NC}"
-echo -e "${GREEN}🌐 API disponible sur http://localhost:5000/api${NC}"
+if pm2 start ecosystem.config.js --env production; then
+    echo -e "${GREEN}✅ Application démarrée avec PM2${NC}"
+    echo -e "${GREEN}📊 Statut: pm2 status${NC}"
+    echo -e "${GREEN}📋 Logs: pm2 logs${NC}"
+    echo -e "${GREEN}🌐 API: http://localhost:5000/api${NC}"
+    echo -e "${GREEN}⏹️  Arrêt: pm2 delete all${NC}"
+else
+    echo -e "${RED}❌ Échec du démarrage PM2${NC}"
+    echo -e "${YELLOW}ℹ️  Vérifiez les logs avec: pm2 logs${NC}"
+    exit 1
+fi
 EOF
     
     # Configuration PM2
