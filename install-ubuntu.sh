@@ -123,14 +123,42 @@ install_nodejs() {
     print_success "PM2 installé globalement"
 }
 
+# Nettoyage des anciens repositories MongoDB
+cleanup_mongodb_repo() {
+    print_info "Nettoyage des anciens repositories MongoDB..."
+    
+    # Supprimer les anciens fichiers de repository
+    ${SUDO_CMD} rm -f /etc/apt/sources.list.d/mongodb-org-*.list
+    
+    # Supprimer les anciennes clés
+    ${SUDO_CMD} rm -f /usr/share/keyrings/mongodb-server-*.gpg
+    
+    # Nettoyer le cache apt
+    ${SUDO_CMD} apt update
+}
+
 # Installation de MongoDB
 install_mongodb() {
     print_header "Installation de MongoDB ${MONGODB_VERSION}"
     
     # Vérifier si MongoDB est déjà installé
-    if systemctl is-active --quiet mongod 2>/dev/null; then
+    if systemctl is-active --quiet mongod 2>/dev/null || systemctl is-active --quiet mongodb 2>/dev/null; then
         print_success "MongoDB est déjà installé et en cours d'exécution"
         return
+    fi
+    
+    # Nettoyer les anciens repositories en cas d'échec précédent
+    cleanup_mongodb_repo
+    
+    # Détecter la version d'Ubuntu et utiliser la bonne approche
+    UBUNTU_VERSION=$(lsb_release -cs)
+    
+    if [[ "$UBUNTU_VERSION" == "noble" ]]; then
+        # Pour Ubuntu 24.04, utiliser le repository jammy (22.04) car noble n'est pas encore supporté
+        print_warning "Ubuntu 24.04 détecté - utilisation du repository Ubuntu 22.04 (jammy) pour MongoDB"
+        MONGODB_UBUNTU_VERSION="jammy"
+    else
+        MONGODB_UBUNTU_VERSION="$UBUNTU_VERSION"
     fi
     
     # Ajouter la clé GPG de MongoDB
@@ -140,16 +168,42 @@ install_mongodb() {
         curl -fsSL https://www.mongodb.org/static/pgp/server-${MONGODB_VERSION}.asc | sudo gpg -o /usr/share/keyrings/mongodb-server-${MONGODB_VERSION}.gpg --dearmor
     fi
     
-    # Ajouter le repository MongoDB
+    # Ajouter le repository MongoDB avec la version Ubuntu appropriée
     if [[ $EUID -eq 0 ]]; then
-        echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-${MONGODB_VERSION}.gpg ] https://repo.mongodb.org/apt/ubuntu $(lsb_release -cs)/mongodb-org/${MONGODB_VERSION} multiverse" | tee /etc/apt/sources.list.d/mongodb-org-${MONGODB_VERSION}.list
+        echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-${MONGODB_VERSION}.gpg ] https://repo.mongodb.org/apt/ubuntu ${MONGODB_UBUNTU_VERSION}/mongodb-org/${MONGODB_VERSION} multiverse" | tee /etc/apt/sources.list.d/mongodb-org-${MONGODB_VERSION}.list
     else
-        echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-${MONGODB_VERSION}.gpg ] https://repo.mongodb.org/apt/ubuntu $(lsb_release -cs)/mongodb-org/${MONGODB_VERSION} multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-${MONGODB_VERSION}.list
+        echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-${MONGODB_VERSION}.gpg ] https://repo.mongodb.org/apt/ubuntu ${MONGODB_UBUNTU_VERSION}/mongodb-org/${MONGODB_VERSION} multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-${MONGODB_VERSION}.list
     fi
     
     # Installer MongoDB
     ${SUDO_CMD} apt update
-    ${SUDO_CMD} apt install -y mongodb-org
+    if ! ${SUDO_CMD} apt install -y mongodb-org; then
+        print_warning "Échec de l'installation via le repository officiel, tentative d'installation alternative..."
+        
+        # Alternative: installer MongoDB via snap si le repository officiel échoue
+        if command -v snap &> /dev/null; then
+            print_info "Installation de MongoDB via snap..."
+            ${SUDO_CMD} snap install mongodb --channel=6.0/stable
+            
+            # Créer un alias pour mongod si nécessaire
+            if ! command -v mongod &> /dev/null; then
+                ${SUDO_CMD} ln -sf /snap/bin/mongodb.mongod /usr/local/bin/mongod
+            fi
+            
+            # Démarrer le service snap
+            ${SUDO_CMD} snap start mongodb
+            print_success "MongoDB installé via snap"
+            return
+        else
+            # Dernière alternative: installer depuis les paquets Ubuntu
+            print_info "Installation de MongoDB depuis les paquets Ubuntu..."
+            ${SUDO_CMD} apt install -y mongodb
+            ${SUDO_CMD} systemctl start mongodb
+            ${SUDO_CMD} systemctl enable mongodb
+            print_success "MongoDB installé depuis les paquets Ubuntu"
+            return
+        fi
+    fi
     
     # Démarrer et activer MongoDB
     ${SUDO_CMD} systemctl start mongod
