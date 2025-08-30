@@ -45,14 +45,31 @@ print_info() {
 # Vérification des privilèges
 check_sudo() {
     if [[ $EUID -eq 0 ]]; then
-        print_error "Ce script ne doit pas être exécuté en tant que root"
-        print_info "Utilisez: ./install-ubuntu.sh"
-        exit 1
-    fi
-
-    # Vérifier si l'utilisateur peut utiliser sudo
-    if ! sudo -n true 2>/dev/null; then
-        print_info "Ce script nécessite des privilèges sudo. Vous serez invité à saisir votre mot de passe."
+        print_warning "Script exécuté en tant que root"
+        print_info "Création d'un utilisateur non-root pour l'application..."
+        
+        # Créer un utilisateur pour l'application si il n'existe pas
+        if ! id "autopost" &>/dev/null; then
+            useradd -m -s /bin/bash autopost
+            usermod -aG sudo autopost
+            print_success "Utilisateur 'autopost' créé"
+        else
+            print_success "Utilisateur 'autopost' existe déjà"
+        fi
+        
+        # Définir les variables pour l'utilisateur
+        APP_USER="autopost"
+        APP_HOME="/home/autopost"
+        SUDO_CMD=""
+    else
+        # Vérifier si l'utilisateur peut utiliser sudo
+        if ! sudo -n true 2>/dev/null; then
+            print_info "Ce script nécessite des privilèges sudo. Vous serez invité à saisir votre mot de passe."
+        fi
+        
+        APP_USER=$(whoami)
+        APP_HOME=$HOME
+        SUDO_CMD="sudo"
     fi
 }
 
@@ -60,8 +77,8 @@ check_sudo() {
 update_system() {
     print_header "Mise à jour du système Ubuntu 24.04"
     
-    sudo apt update && sudo apt upgrade -y
-    sudo apt install -y curl wget gnupg2 software-properties-common apt-transport-https ca-certificates lsb-release
+    ${SUDO_CMD} apt update && ${SUDO_CMD} apt upgrade -y
+    ${SUDO_CMD} apt install -y curl wget gnupg2 software-properties-common apt-transport-https ca-certificates lsb-release
     
     print_success "Système mis à jour avec succès"
 }
@@ -80,11 +97,15 @@ install_nodejs() {
     fi
     
     # Supprimer les anciennes versions
-    sudo apt remove -y nodejs npm 2>/dev/null || true
+    ${SUDO_CMD} apt remove -y nodejs npm 2>/dev/null || true
     
     # Installer Node.js via NodeSource
-    curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | sudo -E bash -
-    sudo apt install -y nodejs
+    if [[ $EUID -eq 0 ]]; then
+        curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
+    else
+        curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | sudo -E bash -
+    fi
+    ${SUDO_CMD} apt install -y nodejs
     
     # Vérifier l'installation
     NODE_INSTALLED_VERSION=$(node --version)
@@ -94,7 +115,11 @@ install_nodejs() {
     print_success "npm ${NPM_INSTALLED_VERSION} installé"
     
     # Installer pm2 globalement pour la gestion des processus
-    sudo npm install -g pm2
+    if [[ $EUID -eq 0 ]]; then
+        npm install -g pm2
+    else
+        sudo npm install -g pm2
+    fi
     print_success "PM2 installé globalement"
 }
 
@@ -109,18 +134,26 @@ install_mongodb() {
     fi
     
     # Ajouter la clé GPG de MongoDB
-    curl -fsSL https://www.mongodb.org/static/pgp/server-${MONGODB_VERSION}.asc | sudo gpg -o /usr/share/keyrings/mongodb-server-${MONGODB_VERSION}.gpg --dearmor
+    if [[ $EUID -eq 0 ]]; then
+        curl -fsSL https://www.mongodb.org/static/pgp/server-${MONGODB_VERSION}.asc | gpg -o /usr/share/keyrings/mongodb-server-${MONGODB_VERSION}.gpg --dearmor
+    else
+        curl -fsSL https://www.mongodb.org/static/pgp/server-${MONGODB_VERSION}.asc | sudo gpg -o /usr/share/keyrings/mongodb-server-${MONGODB_VERSION}.gpg --dearmor
+    fi
     
     # Ajouter le repository MongoDB
-    echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-${MONGODB_VERSION}.gpg ] https://repo.mongodb.org/apt/ubuntu $(lsb_release -cs)/mongodb-org/${MONGODB_VERSION} multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-${MONGODB_VERSION}.list
+    if [[ $EUID -eq 0 ]]; then
+        echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-${MONGODB_VERSION}.gpg ] https://repo.mongodb.org/apt/ubuntu $(lsb_release -cs)/mongodb-org/${MONGODB_VERSION} multiverse" | tee /etc/apt/sources.list.d/mongodb-org-${MONGODB_VERSION}.list
+    else
+        echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-${MONGODB_VERSION}.gpg ] https://repo.mongodb.org/apt/ubuntu $(lsb_release -cs)/mongodb-org/${MONGODB_VERSION} multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-${MONGODB_VERSION}.list
+    fi
     
     # Installer MongoDB
-    sudo apt update
-    sudo apt install -y mongodb-org
+    ${SUDO_CMD} apt update
+    ${SUDO_CMD} apt install -y mongodb-org
     
     # Démarrer et activer MongoDB
-    sudo systemctl start mongod
-    sudo systemctl enable mongod
+    ${SUDO_CMD} systemctl start mongod
+    ${SUDO_CMD} systemctl enable mongod
     
     # Vérifier l'installation
     if systemctl is-active --quiet mongod; then
@@ -140,7 +173,7 @@ install_git() {
         return
     fi
     
-    sudo apt install -y git
+    ${SUDO_CMD} apt install -y git
     print_success "Git installé avec succès"
 }
 
@@ -148,7 +181,7 @@ install_git() {
 install_additional_tools() {
     print_header "Installation d'outils supplémentaires"
     
-    sudo apt install -y \
+    ${SUDO_CMD} apt install -y \
         build-essential \
         python3-pip \
         ufw \
@@ -167,23 +200,23 @@ configure_firewall() {
     print_header "Configuration du firewall (UFW)"
     
     # Réinitialiser UFW
-    sudo ufw --force reset
+    ${SUDO_CMD} ufw --force reset
     
     # Règles par défaut
-    sudo ufw default deny incoming
-    sudo ufw default allow outgoing
+    ${SUDO_CMD} ufw default deny incoming
+    ${SUDO_CMD} ufw default allow outgoing
     
     # Autoriser SSH
-    sudo ufw allow ssh
+    ${SUDO_CMD} ufw allow ssh
     
     # Autoriser les ports de l'application
-    sudo ufw allow 3000/tcp  # Frontend React
-    sudo ufw allow 5000/tcp  # Backend Express
-    sudo ufw allow 80/tcp    # HTTP
-    sudo ufw allow 443/tcp   # HTTPS
+    ${SUDO_CMD} ufw allow 3000/tcp  # Frontend React
+    ${SUDO_CMD} ufw allow 5000/tcp  # Backend Express
+    ${SUDO_CMD} ufw allow 80/tcp    # HTTP
+    ${SUDO_CMD} ufw allow 443/tcp   # HTTPS
     
     # Activer UFW
-    sudo ufw --force enable
+    ${SUDO_CMD} ufw --force enable
     
     print_success "Firewall configuré et activé"
 }
@@ -199,12 +232,16 @@ install_nginx() {
         return
     fi
     
-    sudo apt install -y nginx
-    sudo systemctl start nginx
-    sudo systemctl enable nginx
+    ${SUDO_CMD} apt install -y nginx
+    ${SUDO_CMD} systemctl start nginx
+    ${SUDO_CMD} systemctl enable nginx
     
     # Configuration basique de Nginx pour le reverse proxy
-    sudo tee /etc/nginx/sites-available/${PROJECT_NAME} > /dev/null <<EOF
+    if [[ $EUID -eq 0 ]]; then
+        tee /etc/nginx/sites-available/${PROJECT_NAME} > /dev/null <<EOF
+    else
+        sudo tee /etc/nginx/sites-available/${PROJECT_NAME} > /dev/null <<EOF
+    fi
 server {
     listen 80;
     server_name localhost;
@@ -238,12 +275,12 @@ server {
 EOF
     
     # Activer le site
-    sudo ln -sf /etc/nginx/sites-available/${PROJECT_NAME} /etc/nginx/sites-enabled/
-    sudo rm -f /etc/nginx/sites-enabled/default
+    ${SUDO_CMD} ln -sf /etc/nginx/sites-available/${PROJECT_NAME} /etc/nginx/sites-enabled/
+    ${SUDO_CMD} rm -f /etc/nginx/sites-enabled/default
     
     # Tester la configuration
-    sudo nginx -t
-    sudo systemctl reload nginx
+    ${SUDO_CMD} nginx -t
+    ${SUDO_CMD} systemctl reload nginx
     
     print_success "Nginx installé et configuré"
 }
@@ -252,30 +289,46 @@ EOF
 setup_project() {
     print_header "Configuration du projet AutoPost"
     
+    # Se déplacer dans le répertoire home de l'utilisateur approprié
+    if [[ $EUID -eq 0 ]]; then
+        cd "$APP_HOME"
+        PROJECT_DIR="$APP_HOME/$PROJECT_NAME"
+    else
+        PROJECT_DIR="$PWD"
+        if [[ $(basename "$PWD") != "$PROJECT_NAME" ]]; then
+            PROJECT_DIR="$PWD/$PROJECT_NAME"
+        fi
+    fi
+    
     # Demander l'URL du repository
     echo -e "${YELLOW}Si vous n'avez pas encore de repository Git, vous pouvez ignorer cette étape${NC}"
     read -p "URL du repository Git (optionnel): " REPO_URL
     
     if [[ -n "$REPO_URL" ]]; then
         # Cloner le repository
-        if [[ -d "$PROJECT_NAME" ]]; then
-            print_warning "Le dossier $PROJECT_NAME existe déjà"
+        if [[ -d "$PROJECT_DIR" ]]; then
+            print_warning "Le dossier $PROJECT_DIR existe déjà"
             read -p "Voulez-vous le supprimer et cloner à nouveau ? (y/N): " -n 1 -r
             echo
             if [[ $REPLY =~ ^[Yy]$ ]]; then
-                rm -rf "$PROJECT_NAME"
+                rm -rf "$PROJECT_DIR"
             else
                 print_info "Utilisation du dossier existant"
-                cd "$PROJECT_NAME"
+                cd "$PROJECT_DIR"
             fi
         fi
         
-        if [[ ! -d "$PROJECT_NAME" ]]; then
-            git clone "$REPO_URL" "$PROJECT_NAME"
-            cd "$PROJECT_NAME"
+        if [[ ! -d "$PROJECT_DIR" ]]; then
+            if [[ $EUID -eq 0 ]]; then
+                sudo -u "$APP_USER" git clone "$REPO_URL" "$PROJECT_DIR"
+                chown -R "$APP_USER:$APP_USER" "$PROJECT_DIR"
+            else
+                git clone "$REPO_URL" "$PROJECT_DIR"
+            fi
+            cd "$PROJECT_DIR"
         fi
     else
-        print_info "Création d'un nouveau projet dans le dossier courant"
+        print_info "Utilisation du projet dans le dossier courant"
         if [[ ! -f "package.json" ]]; then
             print_error "Aucun fichier package.json trouvé dans le dossier courant"
             print_error "Veuillez vous assurer d'être dans le bon dossier ou fournir une URL de repository"
@@ -285,7 +338,12 @@ setup_project() {
     
     # Installer toutes les dépendances
     print_info "Installation des dépendances du projet..."
-    npm run install:all
+    if [[ $EUID -eq 0 ]]; then
+        sudo -u "$APP_USER" npm run install:all
+        chown -R "$APP_USER:$APP_USER" .
+    else
+        npm run install:all
+    fi
     
     print_success "Dépendances installées avec succès"
 }
@@ -302,7 +360,11 @@ configure_environment() {
             print_info "Fichier .env créé à partir de env.example"
         else
             # Créer un fichier .env basique
-            cat > .env <<EOF
+            if [[ $EUID -eq 0 ]]; then
+                sudo -u "$APP_USER" tee .env > /dev/null <<EOF
+            else
+                cat > .env <<EOF
+            fi
 # Configuration Base de données
 MONGODB_URI=mongodb://localhost:27017/autopost
 
@@ -329,6 +391,12 @@ EOF
         print_success "Le fichier .env existe déjà"
     fi
     
+    # Définir les permissions appropriées
+    if [[ $EUID -eq 0 ]]; then
+        chown "$APP_USER:$APP_USER" .env
+        chmod 600 .env
+    fi
+    
     print_warning "N'oubliez pas de configurer vos clés API dans le fichier server/.env :"
     echo -e "  ${YELLOW}- OPENAI_API_KEY${NC}"
     echo -e "  ${YELLOW}- LINKEDIN_CLIENT_ID${NC}"
@@ -350,7 +418,11 @@ echo "🚀 Démarrage d'AutoPost en mode développement..."
 # Vérifier que MongoDB est en cours d'exécution
 if ! systemctl is-active --quiet mongod; then
     echo "⚠️  Démarrage de MongoDB..."
-    sudo systemctl start mongod
+    if [[ \$EUID -eq 0 ]]; then
+        systemctl start mongod
+    else
+        sudo systemctl start mongod
+    fi
 fi
 
 # Démarrer l'application
@@ -366,7 +438,11 @@ echo "🚀 Démarrage d'AutoPost en mode production..."
 # Vérifier que MongoDB est en cours d'exécution
 if ! systemctl is-active --quiet mongod; then
     echo "⚠️  Démarrage de MongoDB..."
-    sudo systemctl start mongod
+    if [[ \$EUID -eq 0 ]]; then
+        systemctl start mongod
+    else
+        sudo systemctl start mongod
+    fi
 fi
 
 # Build de l'application
@@ -404,11 +480,17 @@ module.exports = {
 };
 EOF
     
-    # Rendre les scripts exécutables
+    # Rendre les scripts exécutables et définir les permissions
     chmod +x start-dev.sh start-prod.sh
+    if [[ $EUID -eq 0 ]]; then
+        chown "$APP_USER:$APP_USER" start-dev.sh start-prod.sh ecosystem.config.js
+    fi
     
     # Créer le dossier logs
     mkdir -p logs
+    if [[ $EUID -eq 0 ]]; then
+        chown "$APP_USER:$APP_USER" logs
+    fi
     
     print_success "Scripts de démarrage créés"
 }
@@ -426,9 +508,12 @@ create_systemd_service() {
     
     SERVICE_FILE="/etc/systemd/system/${PROJECT_NAME}.service"
     PROJECT_PATH=$(pwd)
-    USER=$(whoami)
     
-    sudo tee "$SERVICE_FILE" > /dev/null <<EOF
+    if [[ $EUID -eq 0 ]]; then
+        tee "$SERVICE_FILE" > /dev/null <<EOF
+    else
+        sudo tee "$SERVICE_FILE" > /dev/null <<EOF
+    fi
 [Unit]
 Description=AutoPost LinkedIn Application
 After=network.target mongod.service
@@ -436,7 +521,7 @@ Wants=mongod.service
 
 [Service]
 Type=forking
-User=${USER}
+User=${APP_USER}
 WorkingDirectory=${PROJECT_PATH}
 ExecStart=${PROJECT_PATH}/start-prod.sh
 Restart=always
@@ -448,11 +533,15 @@ WantedBy=multi-user.target
 EOF
     
     # Recharger systemd et activer le service
-    sudo systemctl daemon-reload
-    sudo systemctl enable "${PROJECT_NAME}.service"
+    ${SUDO_CMD} systemctl daemon-reload
+    ${SUDO_CMD} systemctl enable "${PROJECT_NAME}.service"
     
     print_success "Service systemd créé et activé"
-    print_info "Utilisez 'sudo systemctl start ${PROJECT_NAME}' pour démarrer le service"
+    if [[ $EUID -eq 0 ]]; then
+        print_info "Utilisez 'systemctl start ${PROJECT_NAME}' pour démarrer le service"
+    else
+        print_info "Utilisez 'sudo systemctl start ${PROJECT_NAME}' pour démarrer le service"
+    fi
 }
 
 # Vérification finale
@@ -520,10 +609,18 @@ show_final_instructions() {
     echo -e "• ${BLUE}npm run build${NC}     - Build pour la production"
     
     echo -e "\n${YELLOW}🔧 Services :${NC}"
-    echo -e "• MongoDB : ${BLUE}sudo systemctl status mongod${NC}"
-    echo -e "• Firewall : ${BLUE}sudo ufw status${NC}"
-    if command -v nginx &> /dev/null; then
-        echo -e "• Nginx : ${BLUE}sudo systemctl status nginx${NC}"
+    if [[ $EUID -eq 0 ]]; then
+        echo -e "• MongoDB : ${BLUE}systemctl status mongod${NC}"
+        echo -e "• Firewall : ${BLUE}ufw status${NC}"
+        if command -v nginx &> /dev/null; then
+            echo -e "• Nginx : ${BLUE}systemctl status nginx${NC}"
+        fi
+    else
+        echo -e "• MongoDB : ${BLUE}sudo systemctl status mongod${NC}"
+        echo -e "• Firewall : ${BLUE}sudo ufw status${NC}"
+        if command -v nginx &> /dev/null; then
+            echo -e "• Nginx : ${BLUE}sudo systemctl status nginx${NC}"
+        fi
     fi
     
     echo -e "\n${YELLOW}📖 Documentation :${NC}"
