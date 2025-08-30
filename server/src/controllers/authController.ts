@@ -36,7 +36,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     await user.save();
 
     // Générer le token
-    const token = generateToken(user._id.toString(), user.email);
+    const token = generateToken((user._id as string).toString(), user.email);
 
     res.status(201).json({
       message: 'Utilisateur créé avec succès',
@@ -83,7 +83,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     }
 
     // Générer le token
-    const token = generateToken(user._id.toString(), user.email);
+    const token = generateToken((user._id as string).toString(), user.email);
 
     res.json({
       message: 'Connexion réussie',

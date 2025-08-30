@@ -49,7 +49,7 @@ export const generatePost = async (req: AuthRequest, res: Response): Promise<voi
         topic: post.topic,
         tone: post.tone,
         status: post.status,
-        createdAt: post.createdAt
+        createdAt: (post as any).createdAt
       }
     });
   } catch (error) {

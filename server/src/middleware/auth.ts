@@ -65,5 +65,5 @@ export const generateToken = (userId: string, email: string): string => {
     { userId, email },
     jwtSecret,
     { expiresIn: process.env.JWT_EXPIRE || '7d' }
-  );
+  ) as string;
 };
