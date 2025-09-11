@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   generatePost,
+  generateHashtags,
   getUserPosts,
   getPost,
   updatePost,
@@ -10,7 +11,7 @@ import {
   getPostAnalytics
 } from '../controllers/postController';
 import { authenticateToken } from '../middleware/auth';
-import { validatePostGeneration, validateSchedulePost } from '../middleware/validation';
+import { validatePostGeneration, validateHashtagGeneration, validateSchedulePost } from '../middleware/validation';
 
 const router = Router();
 
@@ -19,6 +20,7 @@ router.use(authenticateToken);
 
 // Routes pour les posts
 router.post('/generate', validatePostGeneration, generatePost);
+router.post('/hashtags', validateHashtagGeneration, generateHashtags);
 router.get('/', getUserPosts);
 router.get('/:id', getPost);
 router.put('/:id', updatePost);

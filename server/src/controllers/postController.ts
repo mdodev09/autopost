@@ -58,6 +58,27 @@ export const generatePost = async (req: AuthRequest, res: Response): Promise<voi
   }
 };
 
+export const generateHashtags = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({
+        message: 'Données invalides',
+        errors: errors.array()
+      });
+      return;
+    }
+
+    const { topic, count } = req.body;
+    const hashtags = await openaiService.generateHashtags(topic, count);
+
+    res.json({ hashtags });
+  } catch (error) {
+    console.error('Erreur lors de la génération des hashtags:', error);
+    res.status(500).json({ message: 'Erreur lors de la génération des hashtags' });
+  }
+};
+
 export const getUserPosts = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const page = parseInt(req.query.page as string) || 1;

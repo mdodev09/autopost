@@ -67,3 +67,7 @@ export interface LinkedInAuthResponse {
   authUrl: string;
   state: string;
 }
+
+export interface HashtagsResponse {
+  hashtags: string[];
+}

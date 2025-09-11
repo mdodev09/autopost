@@ -117,6 +117,11 @@ export const postService = {
   async getPostAnalytics(id: string): Promise<{ analytics: Post['analytics'] }> {
     const response = await api.get(`/posts/${id}/analytics`);
     return response.data;
+  },
+
+  async generateHashtags(topic: string, count = 5): Promise<{ hashtags: string[] }> {
+    const response = await api.post('/posts/hashtags', { topic, count });
+    return response.data;
   }
 };
 

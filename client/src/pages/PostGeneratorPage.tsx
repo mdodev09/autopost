@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
-import { useGeneratePost } from '../hooks/usePosts';
+import { useGeneratePost, useGenerateHashtags } from '../hooks/usePosts';
 import { PostGenerationRequest } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
-import { Sparkles, FileText, Target, MessageSquare } from 'lucide-react';
+import { Sparkles, FileText, Target, MessageSquare, Hash } from 'lucide-react';
 
 const PostGeneratorPage: React.FC = () => {
   const navigate = useNavigate();
   const generatePost = useGeneratePost();
+  const generateHashtags = useGenerateHashtags();
   const [generatedPost, setGeneratedPost] = useState<string>('');
+  const [hashtags, setHashtags] = useState<string[]>([]);
   
   const {
     register,
@@ -32,6 +34,7 @@ const PostGeneratorPage: React.FC = () => {
     try {
       const result = await generatePost.mutateAsync(data);
       setGeneratedPost(result.post.content);
+      setHashtags([]);
     } catch (error) {
       console.error('Erreur lors de la génération:', error);
     }
@@ -247,7 +250,46 @@ const PostGeneratorPage: React.FC = () => {
                     {generatedPost}
                   </div>
                 </div>
+                {hashtags.length > 0 && (
+                  <div className="mb-4 flex flex-wrap gap-2">
+                    {hashtags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="bg-primary-100 text-primary-800 px-2 py-1 rounded text-sm"
+                      >
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="flex space-x-3">
+                  <button
+                    onClick={async () => {
+                      try {
+                        const result = await generateHashtags.mutateAsync({
+                          topic: watch('topic'),
+                          count: 5,
+                        });
+                        setHashtags(result.hashtags);
+                      } catch (err) {
+                        // Erreur déjà gérée par le hook
+                      }
+                    }}
+                    disabled={generateHashtags.isLoading}
+                    className="btn-outline btn-sm"
+                  >
+                    {generateHashtags.isLoading ? (
+                      <>
+                        <LoadingSpinner size="sm" className="mr-2" />
+                        Génération...
+                      </>
+                    ) : (
+                      <>
+                        <Hash className="h-4 w-4 mr-2" />
+                        Générer hashtags
+                      </>
+                    )}
+                  </button>
                   <button
                     onClick={() => navigate('/posts')}
                     className="btn-primary btn-sm"
@@ -256,7 +298,10 @@ const PostGeneratorPage: React.FC = () => {
                     Voir dans mes posts
                   </button>
                   <button
-                    onClick={() => setGeneratedPost('')}
+                    onClick={() => {
+                      setGeneratedPost('');
+                      setHashtags([]);
+                    }}
                     className="btn-outline btn-sm"
                   >
                     Nouveau post

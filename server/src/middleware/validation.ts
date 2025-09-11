@@ -63,6 +63,19 @@ export const validatePostGeneration: ValidationChain[] = [
     .withMessage('L\'audience cible ne peut pas dépasser 100 caractères')
 ];
 
+export const validateHashtagGeneration: ValidationChain[] = [
+  body('topic')
+    .trim()
+    .isLength({ min: 3, max: 200 })
+    .withMessage('Le sujet doit contenir entre 3 et 200 caractères'),
+
+  body('count')
+    .optional()
+    .isInt({ min: 1, max: 20 })
+    .withMessage('Le nombre de hashtags doit être entre 1 et 20')
+    .toInt()
+];
+
 export const validateSchedulePost: ValidationChain[] = [
   body('postId')
     .isMongoId()

@@ -136,3 +136,16 @@ export const usePostAnalytics = (id: string) => {
     }
   );
 };
+
+// Hook pour générer des hashtags
+export const useGenerateHashtags = () => {
+  return useMutation(
+    ({ topic, count }: { topic: string; count?: number }) =>
+      postService.generateHashtags(topic, count),
+    {
+      onError: () => {
+        toast.error('Erreur lors de la génération des hashtags');
+      },
+    }
+  );
+};
